@@ -1,0 +1,1090 @@
+---
+title: "Pretraitement_donnees_telecom"
+author: "Said Ouzzine"
+date: '2024-04-18'
+output:
+  word_document:
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    keep_tex: yes
+    latex_engine: pdflatex
+    extra_dependencies: graphicx
+    fig_crop: no
+    toc: yes
+    toc_depth: 3
+    number_sections: no
+    template: default.latex
+    citation_package: biblatex
+  html_document:
+    toc: yes
+    toc_depth: '3'
+    df_print: paged
+geometry: left=1cm,right=0.5cm,top=1cm,bottom=1cm
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE)
+```
+## Charger les packages nécessaires
+```{r packages,include = TRUE,echo=TRUE}
+library(dplyr)
+library(caret)
+library(glmnet)
+library(randomForest)
+library(class)
+library(tidyr)
+library(pROC)
+library(randomForest)
+
+```
+## Charger les données
+```{r Charger les données, echo=TRUE}
+base_telecom_2022_12 <- read.csv("base_telecom_2022_12.txt", header=TRUE, sep=";")
+
+```
+# Prétraitement des données
+## Conversion des variables de date en format Date
+```{r traitement, echo=TRUE}
+base_telecom_2022_12$date_naissance <- as.Date(base_telecom_2022_12$date_naissance, 
+                                               format = "%d/%m/%Y")
+base_telecom_2022_12$date_activation <- as.Date(base_telecom_2022_12$date_activation, 
+                                                format = "%d/%m/%Y")
+base_telecom_2022_12$date_fin_engagement <- as.Date(base_telecom_2022_12$date_fin_engagement, 
+                                                    format = "%d/%m/%Y")
+base_telecom_2022_12$date_dernier_reengagement <- as.Date(base_telecom_2022_12$date_dernier_reengagement, 
+                                                          format = "%d/%m/%Y")
+```
+## Conversion des variables catégorielles en facteurs
+```{r factor, echo=TRUE}
+base_telecom_2022_12$sexe <- as.factor(base_telecom_2022_12$sexe)
+base_telecom_2022_12$flag_resiliation <- as.factor(base_telecom_2022_12$flag_resiliation)
+base_telecom_2022_12$flag_migration_hausse <- as.factor(base_telecom_2022_12$flag_migration_hausse)
+base_telecom_2022_12$flag_migration_baisse <- as.factor(base_telecom_2022_12$flag_migration_baisse)
+base_telecom_2022_12$flag_personnalisation_repondeur <- as.factor(base_telecom_2022_12$flag_personnalisation_repondeur)
+base_telecom_2022_12$flag_telechargement_sonnerie <- as.factor(base_telecom_2022_12$flag_telechargement_sonnerie)
+base_telecom_2022_12$flag_appels_vers_international <- as.factor(base_telecom_2022_12$flag_appels_vers_international)
+base_telecom_2022_12$flag_appels_depuis_international <- as.factor(base_telecom_2022_12$flag_appels_depuis_international)
+base_telecom_2022_12$flag_appels_numeros_speciaux <- as.factor(base_telecom_2022_12$flag_appels_numeros_speciaux)
+base_telecom_2022_12$csp <- as.factor(base_telecom_2022_12$csp)
+base_telecom_2022_12$type_ville <- as.factor(base_telecom_2022_12$type_ville)
+base_telecom_2022_12$enseigne <- as.factor(base_telecom_2022_12$enseigne)
+base_telecom_2022_12$mode_paiement <- as.factor(base_telecom_2022_12$mode_paiement)
+base_telecom_2022_12$telephone_init <- as.factor(base_telecom_2022_12$telephone_init)
+base_telecom_2022_12$telephone <- as.factor(base_telecom_2022_12$telephone)
+base_telecom_2022_12$situation_impayes <- as.factor(base_telecom_2022_12$situation_impayes)
+base_telecom_2022_12$segment <- as.factor(base_telecom_2022_12$segment)
+# Exclure la variable code_postal
+base_telecom_2022_12 <- subset(base_telecom_2022_12, select = -code_postal)
+
+```
+## Analyse des Durées d'Engagement
+### Création de strates pour client libre d'engagement
+```{r strate, echo=TRUE}
+
+date_base <- as.Date("2022-12-31") # Date de création de la base
+# Calculer la durée d'engagement restante
+base_telecom_2022_12$duree_engagement_restante <- as.numeric(
+                        base_telecom_2022_12$date_fin_engagement - date_base)
+base_telecom_2022_12$duree_engagement_restante_mois <- 
+                        base_telecom_2022_12$duree_engagement_restante / 30.4375  # en mois
+# Graphique de densité de la durée d'engagement restante en fonction de la résiliation
+ggplot(base_telecom_2022_12, aes(x = duree_engagement_restante_mois, fill = factor(flag_resiliation))) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Densité de la durée d'engagement restante par résiliation",
+       x = "Durée d'engagement restante (mois)",
+       y = "Densité",
+       fill = "Résiliation")
+# Sélection des variables pertinentes
+base_telecom_filtered <- base_telecom_2022_12[is.finite(base_telecom_2022_12$duree_engagement_restante_mois), ]
+data_for_clustering <- base_telecom_filtered$duree_engagement_restante_mois
+
+# Choix du nombre de clusters (ex. méthode du coude)
+# Supposons que vous essayez de trouver entre 2 et 10 clusters
+set.seed(151286)  # Pour la reproductibilité
+wss <- sapply(2:5, function(k) kmeans(data_for_clustering, k)$tot.withinss)
+plot(2:5, wss, type="b", pch = 19, frame = FALSE, xlab="Nombre de clusters", ylab="Total Within Sum of Squares")
+
+# Application de l'algorithme K-means avec un nombre de clusters choisi (par exemple, 4)
+num_clusters <- 3
+kmeans_result <- kmeans(data_for_clustering, centers = num_clusters)
+
+# Visualisation des clusters
+plot(data_for_clustering, col=kmeans_result$cluster, main="Clustering des clients", xlab="Clients", ylab="Durée d'engagement restante (mois)")
+points(kmeans_result$centers, col=1:num_clusters, pch=8, cex=2)
+
+# Interprétation des clusters
+cluster_means <- aggregate(data_for_clustering, by=list(kmeans_result$cluster), FUN=mean)
+cluster_means <- cluster_means[order(cluster_means$x),]
+print(cluster_means)
+# -----------------
+# Créer un dataframe avec les résultats du clustering
+cluster_results <- data.frame(cluster = kmeans_result$cluster, flag_resiliation = base_telecom_filtered$flag_resiliation)
+
+#-----------------Evaluation des cluster 
+# ----
+library(cluster)
+
+# Calcul du coefficient de silhouette
+silhouette_score <- silhouette(kmeans_result$cluster, dist(data_for_clustering))
+
+# Affichage du coefficient de silhouette moyen
+print(mean(silhouette_score[, "sil_width"]))
+
+# Calcul de la somme des carrés des distances intra-cluster
+inertia <- sum(kmeans_result$withinss)
+print(paste("Inertie intra-cluster (WCSS) :", inertia))
+# BIC (Bayesian Information Criterion) pour le clustering via un modèle de mélange gaussien
+library(mclust)
+bic <- mclustBIC(data_for_clustering)
+model <- Mclust(data_for_clustering, x = bic)
+print(paste("BIC:", model$bic))
+
+#Analyse de la Variance (ANOVA)
+
+anova_result <- aov(duree_engagement_restante_mois ~ as.factor(kmeans_result$cluster), data=base_telecom_filtered)
+summary(anova_result)
+
+#Indice de Dunn
+# Installer et charger les bibliothèques nécessaires
+install.packages("clValid")
+install.packages("parallel")
+
+library(clValid)
+library(parallel)
+
+# Définir la fonction pour calculer l'indice de Dunn
+calculate_dunn <- function(start, end, data, clusters) {
+  subset_data <- data[start:end, ]
+  subset_clusters <- clusters[start:end]
+  dunn(clusters = subset_clusters, Data = subset_data)
+}
+
+# Diviser les données en chunks
+n_cores <- detectCores() - 1  # Utiliser tous les cœurs disponibles sauf un
+chunk_size <- ceiling(nrow(data_for_clustering) / n_cores)
+chunks <- split(1:nrow(data_for_clustering), ceiling(seq_along(1:nrow(data_for_clustering)) / chunk_size))
+
+# Paralléliser le calcul avec mclapply
+dunn_indices <- mclapply(1:length(chunks), function(i) {
+  chunk <- chunks[[i]]
+  calculate_dunn(start = min(chunk), end = max(chunk), data = data_for_clustering, clusters = kmeans_result$cluster)
+}, mc.cores = n_cores)
+
+# Agréger les résultats
+dunn_mean <- mean(unlist(dunn_indices))
+print(paste("Indice de Dunn moyen :", dunn_mean))
+
+
+
+```
+
+## clustering refaire 
+```{r strate_cluster, echo=TRUE}
+# Charger les bibliothèques nécessaires
+library(cluster)
+
+# Filtrer les données et préparer le jeu de données pour le clustering
+base_telecom_filtered <- base_telecom_2022_12[is.finite(base_telecom_2022_12$duree_engagement_restante_mois), ]
+data_for_clustering <- base_telecom_filtered$duree_engagement_restante_mois
+
+# Ajouter la variable cible dans le jeu de données pour le clustering
+data_with_target <- data.frame(duree_engagement_restante_mois = data_for_clustering, flag_resiliation = base_telecom_filtered$flag_resiliation)
+
+# Pré-clusterisation par la variable cible
+set.seed(151286)
+num_clusters <- 3
+clusters_by_target <- split(data_with_target, data_with_target$flag_resiliation)
+
+# Initialiser les résultats du clustering
+kmeans_results <- list()
+
+# Appliquer K-means sur chaque sous-groupe
+for (target in names(clusters_by_target)) {
+  subset_data <- clusters_by_target[[target]]$duree_engagement_restante_mois
+  kmeans_results[[target]] <- kmeans(subset_data, centers = num_clusters)
+  clusters_by_target[[target]]$cluster <- kmeans_results[[target]]$cluster
+}
+
+# Combiner les résultats des sous-groupes
+final_clusters <- do.call(rbind, clusters_by_target)
+
+# Visualisation des clusters
+plot(final_clusters$duree_engagement_restante_mois, col=final_clusters$cluster, main="Clustering des clients", xlab="Clients", ylab="Durée d'engagement restante (mois)")
+points(aggregate(duree_engagement_restante_mois ~ cluster, final_clusters, mean)$duree_engagement_restante_mois, col=1:num_clusters, pch=8, cex=2)
+
+# Interprétation des clusters
+cluster_means <- aggregate(final_clusters$duree_engagement_restante_mois, by=list(final_clusters$cluster), FUN=mean)
+cluster_means <- cluster_means[order(cluster_means$x),]
+print(cluster_means)
+
+# Créer un dataframe avec les résultats du clustering
+cluster_results <- data.frame(cluster = final_clusters$cluster, flag_resiliation = final_clusters$flag_resiliation)
+
+# Calcul du coefficient de silhouette
+silhouette_score <- silhouette(final_clusters$cluster, dist(final_clusters$duree_engagement_restante_mois))
+
+# Affichage du coefficient de silhouette moyen
+print(mean(silhouette_score[, "sil_width"]))
+
+# Calcul de la somme des carrés des distances intra-cluster
+inertia <- sum(sapply(kmeans_results, function(x) x$tot.withinss))
+print(paste("Inertie intra-cluster (WCSS) :", inertia))
+
+
+```
+
+### Visualisation de la distribution des durées d'engagement
+```{r viz_strate, echo=TRUE}
+# Histogramme de la variable duree_engagement_restante_mois en fonction de la résiliation
+# pour visualiser la distribution des durées d'engagement restantes pour les clients résiliés et non résiliés.
+library(ggplot2)
+
+# Filtrer les valeurs non-finites
+base_telecom_filtered <- base_telecom_2022_12[is.finite(base_telecom_2022_12$duree_engagement_restante_mois), ]
+
+# boxplot de la variable duree_engagement_restante_mois en fonction de la résiliation pour visualiser la médiane, les quartiles et les valeurs aberrantes.
+ggplot(base_telecom_2022_12, aes(x = flag_resiliation, y = duree_engagement_restante_mois, 
+                                 fill = flag_resiliation)) +
+  geom_boxplot() +
+  labs(title = "Distribution de la durée d'engagement restante par résiliation",
+       x = "Résiliation",
+       y = "Durée d'engagement restante (mois)",
+       fill = "Résiliation")
+
+```
+## Stratification et choix des seuils 
+```{r seuils_strate, echo=TRUE}
+# Spécifier les seuils pour trois strates
+#seuils <- quantile(base_telecom_2022_12$duree_engagement_restante_mois, probs = c(0, 1/3, 2/3, 1), 
+                   #na.rm = TRUE)[c(1, 3, 4)]
+# Les centres des clusters obtenus
+cluster_means$x
+# [1] -17.299492   2.130313  15.755817
+
+# Créer les seuils en utilisant les centres de clusters
+seuils <- cluster_means$x
+
+# Ajouter les limites inférieures et supérieures
+breaks <- c(seuils, Inf)
+
+# Créer les strates
+base_telecom_2022_12$strate_engagement <- cut(base_telecom_2022_12$duree_engagement_restante_mois,
+                                              breaks = breaks,
+                                              labels = c("Court terme", "Moyen terme", "Long terme"),
+                                              include.lowest = TRUE)
+
+# Vérifiez les résultats
+table(base_telecom_2022_12$strate_engagement)
+
+
+# Calculer le taux de résiliation pour chaque strate
+resiliation_rate <- tapply(base_telecom_2022_12$flag_resiliation, base_telecom_2022_12$strate_engagement, 
+                           function(x) sum(x == "1") / length(x) * 100)
+
+# Visualiser les taux de résiliation par strate
+print(resiliation_rate)
+# Créer une fonction pour calculer les taux de résiliation et de non-résiliation
+calculate_resiliation_rate <- function(data, stratification_var) {
+  resiliation_rate <- tapply(data$flag_resiliation, data[, stratification_var], function(x) {
+    resiliation_count <- sum(x == "1")
+    non_resiliation_count <- sum(x == "0")
+    total_count <- length(x)
+    resiliation_percentage <- (resiliation_count / total_count) * 100
+    non_resiliation_percentage <- (non_resiliation_count / total_count) * 100
+    return(c(Resilié = resiliation_percentage, Non_Resilié = non_resiliation_percentage))
+  })
+  return(resiliation_rate)
+}
+
+# Utiliser la fonction pour calculer les taux de résiliation pour chaque strate
+resiliation_rate <- calculate_resiliation_rate(base_telecom_2022_12, "strate_engagement")
+
+# Convertir les résultats en data frame et reformater pour obtenir deux colonnes distinctes
+resiliation_df <- as.data.frame(matrix(unlist(resiliation_rate), ncol = 2, byrow = TRUE))
+
+# Ajouter une colonne pour la strate
+resiliation_df$Strate <- rownames(resiliation_df)
+
+# Nommer les colonnes
+colnames(resiliation_df) <- c("Resilié", "Non_Resilié", "Strate")
+
+# Afficher les résultats
+print(resiliation_df)
+# Renommer les strates avec leurs vrais noms
+resiliation_df$Strate <- c( "Court terme", "Moyen terme", "Long terme")
+
+# Reformater les données pour les rendre adaptées à ggplot2
+resiliation_df_long <- pivot_longer(resiliation_df, cols = c("Resilié", "Non_Resilié"), 
+                                    names_to = "Statut", values_to = "Taux")
+library(ggplot2)
+
+
+# Créer un graphique à barres côte à côte
+ggplot(resiliation_df_long, aes(x = Strate, y = Taux, fill = Statut)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Taux de résiliation par strate",
+       x = "Strate d'engagement",
+       y = "Taux (%)") +
+  scale_fill_manual(values = c("Resilié" = "red", "Non_Resilié" = "blue")) +
+  theme_minimal() +
+  theme(legend.position = "top") +
+  geom_text(aes(label = round(Taux, 1)), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.25)
+
+
+```
+## Nettoyage des données
+```{r Nettoyage_données, echo=TRUE}
+# Calculer le nombre de valeurs manquantes par colonne
+missing_values <- colSums(is.na(base_telecom_2022_12))
+
+# Afficher seulement les colonnes avec des valeurs manquantes
+print(missing_values[missing_values > 0])
+# Imputation de la date de naissance par la médiane stratifiée par CSP
+# Imputation des valeurs manquantes pour la date de naissance
+# Imputer en utilisant la médiane de chaque groupe de la variable CSP
+base_telecom_2022_12 <- base_telecom_2022_12 %>%
+  group_by(csp) %>%
+  mutate(date_naissance = if_else(is.na(date_naissance), median(date_naissance, na.rm = TRUE), 
+                                  date_naissance)) %>%
+  ungroup()
+#imputer nb_sms_m3
+# Calculer la moyenne des SMS envoyés par chaque client sur les mois non manquants
+base_telecom_2022_12$mean_sms_3m <- rowMeans(base_telecom_2022_12[, 
+                                            c("nb_sms_m1", "nb_sms_m2", "nb_sms_m4", "nb_sms_m5", "nb_sms_m6")], 
+                                             na.rm = TRUE)
+
+# Imputer les valeurs manquantes du nombre de SMS envoyés il y a 3 mois
+base_telecom_2022_12$nb_sms_m3[is.na(base_telecom_2022_12$nb_sms_m3)] <- base_telecom_2022_12$mean_sms_3m[is.na(base_telecom_2022_12$nb_sms_m3)]
+
+# Supprimer la colonne temporaire mean_sms
+base_telecom_2022_12$mean_sms_3m <- NULL
+
+# Diviser l'ensemble de données en strates
+stratified_data <- split(base_telecom_2022_12, base_telecom_2022_12$strate_engagement)
+
+# Définir les variables numériques et catégorielles
+
+
+numeric_vars <- c("taille_ville", "revenu_moyen_ville", "nb_sms_m3", 
+                  "duree_engagement_restante", "duree_engagement_restante_mois")
+categorical_vars <- c("strate_engagement")
+
+# Imputer les valeurs manquantes dans chaque strate
+for (i in 1:length(stratified_data)) {
+  stratum <- stratified_data[[i]]
+  
+  # Imputer les valeurs manquantes pour les variables numériques
+  for (var in numeric_vars) {
+    if (any(is.na(stratum[[var]]))) {
+      na_mean <- mean(stratum[[var]], na.rm = TRUE)
+      na_median <- median(stratum[[var]], na.rm = TRUE)
+      stratum[[var]][is.na(stratum[[var]])] <- na_mean  # Remplacer par la moyenne
+    }
+  }
+  
+  # Imputer les valeurs manquantes pour les variables catégorielles
+  for (var in categorical_vars) {
+    if (any(is.na(stratum[[var]]))) {
+      mode_value <- names(which.max(table(stratum[[var]])))
+      stratum[[var]][is.na(stratum[[var]])] <- mode_value  # Remplacer par la modalité la plus fréquente
+    }
+  }
+  
+  # Remplacer la strate d'origine par la strate imputée
+  stratified_data[[i]] <- stratum
+}
+
+# Réassembler les données
+imputed_data <- do.call(rbind, stratified_data)
+df_data <- as.data.frame(imputed_data)
+# Analyse de variable de stratification
+
+# Vérifier les valeurs manquantes
+sum(is.na(df_data$duree_engagement_restante_mois))
+
+# Calculer les statistiques uniquement si aucune valeur manquante n'est présente
+if(sum(is.na(df_data$duree_engagement_restante_mois)) == 0) {
+  # Moyennes
+  mean_duration <- tapply(df_data$duree_engagement_restante_mois, df_data$flag_resiliation, mean)
+  print(mean_duration)
+
+  # Médianes
+  median_duration <- tapply(df_data$duree_engagement_restante_mois, df_data$flag_resiliation, median)
+  print(median_duration)
+} else {
+  print("Il y a des valeurs manquantes dans la variable 'duree_engagement_restante_mois'. 
+        Veuillez les traiter avant de calculer les statistiques.")
+}
+# Exclure les variables géographiques
+df_data <- df_data %>%
+  select(-taille_ville, -type_ville, -revenu_moyen_ville,-duree_engagement_restante,
+         -duree_engagement_restante_mois)
+
+# Calculer le nombre de valeurs manquantes par colonne
+missing_values <- colSums(is.na(df_data))
+
+# Afficher seulement les colonnes avec des valeurs manquantes
+print(missing_values[missing_values > 0])
+```
+## Création de nouvelles variables 
+```{r création_variables, echo=TRUE}
+date_base <- as.Date("2022-12-31") # Date de création de la base
+
+# Création de nouvelles variables 
+# Calcul de l'âge à partir de la date de naissance
+df_data$age <- floor(as.numeric(date_base - df_data$date_naissance, units = "days") / 365.25)
+
+
+# Calcul de l'ancienneté depuis la date d'activation
+# Calcul de l'ancienneté en année
+df_data$anciennete <- floor(as.numeric(date_base-df_data$date_activation, units = "days")/ 365.25)
+
+
+# Calcul de la durée d'engagement restante
+df_data$duree_engagement_restante <- as.numeric(difftime(date_base,df_data$date_fin_engagement, units = "days"))
+df_data$duree_engagement_restante <- floor(df_data$duree_engagement_restante / 30.4375)
+df_data$duree_engagement_restante[df_data$duree_engagement_restante < 0] <- 0
+
+# Calcul de l'ancienneté du dernier réengagement
+df_data$anciennete_dernier_reengagement <- as.numeric(date_base-df_data$date_dernier_reengagement, units = "days")
+df_data$anciennete_dernier_reengagement  <- df_data$anciennete_dernier_reengagement /30.4375
+df_data$anciennete_dernier_reengagement[df_data$anciennete_dernier_reengagement < 0] <- 0
+
+# Calculer la moyenne par strate
+mean_by_stratum <- tapply(df_data$anciennete_dernier_reengagement, df_data$strate_engagement, mean, na.rm = TRUE)
+
+# Imputer les valeurs manquantes par la moyenne de la strate correspondante
+for (i in which(is.na(df_data$anciennete_dernier_reengagement))) {
+  stratum <- df_data$strate_engagement[i]
+  df_data$anciennete_dernier_reengagement[i] <- mean_by_stratum[stratum]
+}
+
+
+# Calcul de la durée du dernier réengagement
+df_data$duree_dernier_reengagement <- as.numeric(date_base- df_data$date_dernier_reengagement, units = "days")
+df_data$duree_dernier_reengagement <- floor(df_data$duree_dernier_reengagement/30.4375)
+
+# Calculer la moyenne par strate
+mean_by_stratum <- tapply(df_data$duree_dernier_reengagement, df_data$strate_engagement, mean, na.rm = TRUE)
+
+# Imputer les valeurs manquantes par la moyenne de la strate correspondante
+for (i in which(is.na(df_data$duree_dernier_reengagement))) {
+  stratum <- df_data$strate_engagement[i]
+  df_data$duree_dernier_reengagement[i] <- mean_by_stratum[stratum]
+}
+
+print(head(df_data,5))
+# Sélectionner uniquement les variables qui ne commencent pas par "date"
+df_data <- df_data %>%
+  select(-starts_with("date"))
+
+# Afficher les premières lignes du nouveau jeu de données
+print(head(df_data,5))
+```
+# Encodade des variables qualitatives
+
+## Sans encodage 
+```{r Sans_encodage , echo=TRUE}
+# Convertir les variables catégorielles en facteurs
+variables_categorielles <- c("sexe","csp", "enseigne", "mode_paiement", "telephone_init", "telephone", "situation_impayes","segment")
+
+df_data[, variables_categorielles] <- lapply(df_data[, variables_categorielles], as.factor)
+print(head(df_data,5))
+```
+## One-hot Encoding
+```{r One-hot_Encoding , echo=TRUE}
+# Encoder la variable 'sexe' manuellement en spécifiant les niveaux
+encoded_sexe <- model.matrix(~ 0 + sexe, data = df_data)
+# Supprimer la variable d'origine 'sexe' du dataframe
+df_data_on_hot <- cbind(df_data, encoded_sexe)
+df_data_on_hot  <- df_data_on_hot [, !names(df_data_on_hot ) %in% c("sexe")]
+# Encoder les variables catégorielles en utilisant le codage one-hot
+variables_categorielles_one_hot <- variables_categorielles[!variables_categorielles %in% "sexe"]
+encoded_matrix <- model.matrix(~ 0 + ., data = df_data_on_hot [, variables_categorielles_one_hot])
+
+# Créer un nouveau data frame avec les variables encodées
+encoded_data_one_hot <- cbind(df_data_on_hot [, -which(names(df_data_on_hot ) %in% variables_categorielles_one_hot)], encoded_matrix)
+
+# Afficher la structure de la nouvelle base de données encodée
+str(encoded_data_one_hot)
+print(head(encoded_data_one_hot,5))
+```
+## Encodage de fréquence
+```{r Encodage_fréquence , echo=TRUE}
+encoded_data_freq <- df_data
+
+for (col in variables_categorielles) {
+  freq_table <- table(df_data[[col]])
+  encoded_data_freq[[col]] <- freq_table[as.character(df_data[[col]])]
+}
+print(head(encoded_data_freq,5))
+
+```
+## Encodage basé sur la cible
+```{r Encodage_cible , echo=TRUE}
+# Exclure la variable strate_engagement de la liste des variables catégorielles
+variables_categorielles <- setdiff(variables_categorielles, "strate_engagement")
+
+# Calculer la moyenne de la variable cible pour chaque catégorie de chaque variable catégorielle
+df_data$flag_resiliation <- as.numeric(as.character(df_data$flag_resiliation))
+target_encoding_tables <- lapply(variables_categorielles, function(col) {
+  df_data %>%
+    group_by(!!sym(col)) %>%
+    summarize(target_mean = mean(flag_resiliation, na.rm = TRUE)) %>%
+    mutate(!!paste0("encoded_", col) := target_mean) %>%
+    select(!!sym(col), !!sym(paste0("encoded_", col)))
+})
+
+# Fusionner les tables d'encodage basées sur la cible pour toutes les variables catégorielles
+encoded_data_target <- df_data
+for (i in seq_along(variables_categorielles)) {
+  encoded_data_target <- left_join(encoded_data_target, target_encoding_tables[[i]], by = variables_categorielles[i])
+}
+
+# Supprimer les colonnes originales
+encoded_data_target <- encoded_data_target[, !names(encoded_data_target) %in% variables_categorielles]
+
+# Afficher les premières lignes du dataframe encodé
+print(head(encoded_data_target, 5))
+
+
+```
+# Modèlisation
+## Modèle linéaire généralisé (GLM)
+```{r model_glm , echo=TRUE}
+library(glmnet)
+library(caret)
+library(pROC)  # Pour la fonction roc
+set.seed(151286)  # Pour la reproductibilité
+
+# Diviser les données en 75% entraînement et 25% test
+train_indices <- createDataPartition(df_data$flag_resiliation, p = 0.75, list = FALSE)
+train_data <- df_data[train_indices, ]
+test_data <- df_data[-train_indices, ]
+
+train_indices_one_hot <- createDataPartition(encoded_data_one_hot$flag_resiliation, p = 0.75, list = FALSE)
+train_data_one_hot <- encoded_data_one_hot[train_indices_one_hot, ]
+test_data_one_hot <- encoded_data_one_hot[-train_indices_one_hot, ]
+
+train_indices_freq <- createDataPartition(encoded_data_freq$flag_resiliation, p = 0.75, list = FALSE)
+train_data_freq <- encoded_data_freq[train_indices_freq, ]
+test_indices_freq <- setdiff(seq_len(nrow(encoded_data_freq)), train_indices_freq)
+test_data_freq <- encoded_data_freq[test_indices_freq, ]
+
+train_indices_target <- createDataPartition(encoded_data_target$flag_resiliation, p = 0.75, list = FALSE)
+train_data_target <- encoded_data_target[train_indices_target, ]
+test_data_target <- encoded_data_target[-train_indices_target, ]
+
+# Fonction pour entraîner un modèle glm et évaluer les performances
+train_and_evaluate <- function(train_data, test_data) {
+  # Enlever les variables id_client et strate_engagement
+  train_data <- train_data[, !(names(train_data) %in% c("id_client", "strate_engagement"))]
+  test_data <- test_data[, !(names(test_data) %in% c("id_client", "strate_engagement"))]
+  
+  # Entraîner un modèle glm
+  glm_model <- glm(flag_resiliation ~ ., data = train_data, family = binomial)
+  
+  # Prédire les probabilités de résiliation sur les données de test
+  predicted_probabilities <- predict(glm_model, newdata = test_data, type = "response")
+  
+  # Évaluer les performances en calculant le score de propension (AUC)
+  auc <- roc(test_data$flag_resiliation, predicted_probabilities)$auc
+  
+  # Retourner le score de propension (AUC)
+  return(auc)
+}
+
+# Diviser les données en ensembles d'entraînement et de test pour chaque strate
+# Méthode Sans encodage
+stratified_train_test <- lapply(unique(df_data$strate_engagement), function(stratum) {
+  train_indices <- which(df_data$strate_engagement != stratum)
+  test_indices <- which(df_data$strate_engagement == stratum)
+  list(train = df_data[train_indices, ], test = df_data[test_indices, ])
+})
+
+# Méthode d'encodage one-hot
+stratified_train_test_one_hot <- lapply(unique(encoded_data_one_hot$strate_engagement), function(stratum) {
+  train_indices <- which(encoded_data_one_hot$strate_engagement != stratum)
+  test_indices <- which(encoded_data_one_hot$strate_engagement == stratum)
+  list(train = encoded_data_one_hot[train_indices, ], test = encoded_data_one_hot[test_indices, ])
+})
+
+# Méthode d'encodage basé sur la fréquence
+stratified_train_test_freq <- lapply(unique(encoded_data_freq$strate_engagement), function(stratum) {
+  train_indices <- which(encoded_data_freq$strate_engagement != stratum)
+  test_indices <- which(encoded_data_freq$strate_engagement == stratum)
+  list(train = encoded_data_freq[train_indices, ], test = encoded_data_freq[test_indices, ])
+})
+
+# Méthode d'encodage basé sur la cible
+stratified_train_test_target <- lapply(unique(encoded_data_target$strate_engagement), function(stratum) {
+  train_indices <- which(encoded_data_target$strate_engagement != stratum)
+  test_indices <- which(encoded_data_target$strate_engagement == stratum)
+  list(train = encoded_data_target[train_indices, ], test = encoded_data_target[test_indices, ])
+})
+
+# Fonction pour récupérer les dimensions des ensembles d'entraînement et de test
+get_dimensions <- function(stratified_data) {
+  lapply(stratified_data, function(data) {
+    train_dim <- dim(data$train)
+    test_dim <- dim(data$test)
+    list(train_dim = train_dim, test_dim = test_dim)
+  })
+}
+
+# Récupérer les dimensions pour chaque méthode d'encodage
+dimensions_sans_encodage <- get_dimensions(stratified_train_test)
+dimensions_one_hot <- get_dimensions(stratified_train_test_one_hot)
+dimensions_freq <- get_dimensions(stratified_train_test_freq)
+dimensions_target <- get_dimensions(stratified_train_test_target)
+
+# Afficher les dimensions sous forme de tableau
+print_dimensions <- function(dimensions, method) {
+  cat("Dimensions pour la méthode", method, ":\n")
+  for (i in 1:length(dimensions)) {
+    cat("Strate", i, ": Train =", dimensions[[i]]$train_dim, ", Test =", dimensions[[i]]$test_dim, "\n")
+  }
+}
+
+print_dimensions(dimensions_sans_encodage, "Sans encodage")
+print_dimensions(dimensions_one_hot, "One-hot encoding")
+print_dimensions(dimensions_freq, "Encodage basé sur la fréquence")
+print_dimensions(dimensions_target, "Encodage basé sur la cible")
+
+# Liste pour stocker les scores AUC pour chaque méthode d'encodage
+auc_scores <- list()
+
+# Méthode Sans encodage
+auc_scores$sans_encodage <- sapply(stratified_train_test, function(stratum_data) {
+  train_data <- stratum_data$train
+  test_data <- stratum_data$test
+  train_and_evaluate(train_data, test_data)
+})
+
+# Méthode d'encodage one-hot
+auc_scores$encodage_one_hot <- sapply(stratified_train_test_one_hot, function(stratum_data) {
+  train_data <- stratum_data$train
+  test_data <- stratum_data$test
+  train_and_evaluate(train_data, test_data)
+})
+
+# Méthode d'encodage basé sur la fréquence
+auc_scores$encodage_freq <- sapply(stratified_train_test_freq, function(stratum_data) {
+  train_data <- stratum_data$train
+  test_data <- stratum_data$test
+  train_and_evaluate(train_data, test_data)
+})
+
+# Méthode d'encodage basé sur la cible
+auc_scores$encodage_target <- sapply(stratified_train_test_target, function(stratum_data) {
+  train_data <- stratum_data$train
+  test_data <- stratum_data$test
+  train_and_evaluate(train_data, test_data)
+})
+
+# Définir une fonction pour afficher les scores AUC formatés avec les valeurs uniques de strate_engagement
+print_auc_scores <- function(auc_scores, encodage_method, strate_values) {
+  cat("Méthode d'encodage ", encodage_method, " :\n")
+  for (i in 1:length(auc_scores)) {
+    cat("- Strate ", strate_values[i], " : AUC = ", auc_scores[i], "\n")
+  }
+}
+
+# Récupérer les valeurs uniques de strate_engagement
+unique_strates <- levels(factor(df_data$strate_engagement))
+
+# Afficher les scores AUC pour chaque méthode d'encodage avec les valeurs uniques de strate_engagement
+print_auc_scores(auc_scores$sans_encodage, "Sans encodage", unique_strates)
+print_auc_scores(auc_scores$encodage_one_hot, "One-hot encoding", unique_strates)
+print_auc_scores(auc_scores$encodage_freq, "Encodage basé sur la fréquence", unique_strates)
+print_auc_scores(auc_scores$encodage_target, "Encodage basé sur la cible", unique_strates)
+
+```
+### Comparaison des méthodes d'encodage avec GLM
+```{r model_glm_score , echo=TRUE}
+# Fonction pour calculer le score de propension à partir des AUC
+calculate_propensity_score <- function(auc_scores) {
+  return(mean(unlist(auc_scores)))
+}
+
+# Calculer le score de propension pour chaque méthode d'encodage
+propensity_scores <- c(
+  sans_encodage = calculate_propensity_score(auc_scores$sans_encodage),
+  encodage_one_hot = calculate_propensity_score(auc_scores$encodage_one_hot),
+  encodage_freq = calculate_propensity_score(auc_scores$encodage_freq),
+  encodage_target = calculate_propensity_score(auc_scores$encodage_target)
+)
+
+# Afficher les scores de propension pour chaque méthode d'encodage
+print(propensity_scores)
+```
+
+## Modèle Random Forest (RF)
+```{r model_RF , echo=TRUE}
+
+train_and_evaluate_rf <- function(train_data, test_data) {
+  # Supprimer les variables id_client et strate_engagement
+  train_data <- subset(train_data, select = -c(id_client, strate_engagement))
+  test_data <- subset(test_data, select = -c(id_client, strate_engagement))
+  test_data$flag_resiliation <- as.numeric(as.character(test_data$flag_resiliation))
+  train_data$flag_resiliation <- as.numeric(as.character(train_data$flag_resiliation))
+  # Supprimer les lignes avec des valeurs manquantes dans le jeu de données
+  test_data <- test_data[complete.cases(test_data), ]
+  # Supprimer les lignes avec des valeurs manquantes dans le jeu de données
+  train_data <- train_data[complete.cases(train_data), ]
+  
+  # Renommer la variable avec un trait de soulignement
+  # Obtenir les noms de colonnes avec des espaces
+  columns_with_space <- colnames(train_data)[grepl(" ", colnames(train_data))]
+  
+  # Remplacer les espaces par des traits de soulignement dans les noms de colonnes
+  colnames(train_data) <- gsub(" ", "_", colnames(train_data))
+  colnames(test_data) <- gsub(" ", "_", colnames(test_data))
+  
+  # Imprimer les dimensions des données
+  cat("Dimensions des données d'entraînement :\n")
+  print(dim(train_data))
+  cat("Dimensions des données de test :\n")
+  print(dim(test_data))
+  
+  # Vérifier si la variable cible existe
+  if ("flag_resiliation" %in% colnames(train_data)) {
+    cat("La variable cible 'flag_resiliation' existe.\n")
+    
+    # Entraîner un modèle Random Forest
+    rf_model <- randomForest(flag_resiliation ~ ., data = train_data, ntree = 100)
+    cat("Modèle Random Forest entraîné.\n")
+    
+    # Prédire les probabilités de résiliation sur les données de test
+    predicted_probabilities <- predict(rf_model, newdata = test_data, type = "response")
+    cat("Prédictions effectuées.\n")
+    
+    # Vérifier les premières lignes des prédictions
+    cat("Premières lignes des prédictions :\n")
+    print(head(predicted_probabilities))
+    
+    
+    # Évaluer les performances en calculant le score AUC
+    auc <- roc(test_data$flag_resiliation, predicted_probabilities)$auc
+    cat("Score AUC calculé :", auc, "\n")
+    
+    # Retourner le score AUC
+    return(auc)
+  } else {
+    # Retourner une indication que la variable cible n'existe pas
+    return("Variable cible 'flag_resiliation' introuvable")
+  }
+}
+
+
+# Créer une liste des données d'entraînement et de test pour chaque méthode d'encodage et chaque strate
+stratified_train_test_rf <- lapply(unique(df_data$strate_engagement), function(stratum) {
+  train_indices <- which(df_data$strate_engagement != stratum)
+  test_indices <- which(df_data$strate_engagement == stratum)
+  
+  # Sous-liste pour stocker les données d'entraînement et de test pour chaque méthode d'encodage
+  stratified_train_test <- list()
+  
+  # Méthode Sans encodage
+  stratified_train_test$sans_encodage <- list(
+    train = df_data[train_indices, ],
+    test = df_data[test_indices, ]
+  )
+  
+  # Méthode d'encodage one-hot
+  stratified_train_test$encodage_one_hot <- list(
+    train = encoded_data_one_hot[train_indices, ],
+    test = encoded_data_one_hot[test_indices, ]
+  )
+  
+  # Méthode d'encodage basé sur la fréquence
+  stratified_train_test$encodage_freq <- list(
+    train = encoded_data_freq[train_indices, ],
+    test = encoded_data_freq[test_indices, ]
+  )
+  
+  # Méthode d'encodage basé sur la cible
+  stratified_train_test$encodage_target <- list(
+    train = encoded_data_target[train_indices, ],
+    test = encoded_data_target[test_indices, ]
+  )
+  
+  return(stratified_train_test)
+})
+
+# Liste pour stocker les scores AUC pour chaque méthode d'encodage et chaque strate
+auc_scores_rf <- list()
+
+# Entraîner et évaluer le modèle Random Forest pour chaque combinaison de méthode d'encodage et de strate
+for (i in 1:length(stratified_train_test_rf)) {
+  stratum_data <- stratified_train_test_rf[[i]]
+  
+  # Sous-liste pour stocker les scores AUC pour chaque méthode d'encodage
+  auc_scores_stratum <- list()
+  
+  for (encodage_method in names(stratum_data)) {
+    train_data <- stratum_data[[encodage_method]]$train
+    test_data <- stratum_data[[encodage_method]]$test
+    
+    # Entraîner et évaluer le modèle Random Forest
+    auc_score <- train_and_evaluate_rf(train_data, test_data)
+    
+    # Stocker le score AUC pour cette méthode d'encodage
+    auc_scores_stratum[[encodage_method]] <- auc_score
+  }
+  
+  # Stocker les scores AUC pour cette strate
+  auc_scores_rf[[i]] <- auc_scores_stratum
+}
+
+# Définir une fonction pour afficher les scores AUC formatés avec les valeurs uniques de strate_engagement
+print_auc_scores_rf <- function(auc_scores, strate_values) {
+  for (i in 1:length(auc_scores)) {
+    cat("- Strate ", strate_values[i], " :\n")
+    for (encodage_method in names(auc_scores[[i]])) {
+      cat("  - Méthode d'encodage ", encodage_method, " : AUC = ", auc_scores[[i]][[encodage_method]], "\n")
+    }
+  }
+}
+
+# Afficher les scores AUC pour chaque méthode d'encodage et chaque strate
+print_auc_scores_rf(auc_scores_rf, unique_strates)
+
+# Définir les AUC pour chaque méthode et strate
+auc_values <- list(
+  sans_encodage = c(court_terme = 0.8004611, moyen_terme = 0.8705431, long_terme = 0.8858352),
+  one_hot_encoding = c(court_terme = 0.7909125, moyen_terme = 0.8687572, long_terme = 0.8784437),
+  encodage_par_frequence = c(court_terme = 0.7934062, moyen_terme = 0.8659462, long_terme = 0.8803259),
+  encodage_par_cible = c(court_terme = 0.7911878, moyen_terme = 0.8742857, long_terme = 0.8741718)
+)
+
+# Calculer la moyenne des AUC pour chaque méthode d'encodage
+calculate_propensity_score <- function(auc_list) {
+  return(mean(unlist(auc_list)))
+}
+
+propensity_scores <- sapply(auc_values, calculate_propensity_score)
+
+# Afficher les scores de propension
+propensity_scores
+
+``` 
+## interpretation
+```{r interpretation , echo=TRUE}
+# Création du dataframe avec les AUC pour chaque méthode d'encodage et strate
+auc_data <- data.frame(
+  Methode_encodage = rep(c("Sans encodage", "One hot encoding", "Encodage par fréquence", "Encodage par cible"), each = 3),
+  Strate = rep(c("court terme", "moyen terme", "long terme"), 4),
+  AUC = c(0.8004611, 0.870543, 0.8858352,   # Sans encodage
+          0.7909125, 0.8687572, 0.8784437,   # One hot encoding
+          0.7934062, 0.8659462, 0.8803259,   # Encodage par fréquence
+          0.7911878, 0.8742857, 0.8741718)   # Encodage par cible
+)
+library(ggplot2)
+
+# Visualisation des AUC par méthode d'encodage et strate
+ggplot(auc_data, aes(x = Strate, y = AUC, fill = Methode_encodage)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparaison des AUC par méthode d'encodage et strate",
+       x = "Strate", y = "AUC") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+kruskal.test(AUC ~ Methode_encodage, data = auc_data)
+
+# Installer le package shapper s'il n'est pas déjà installé
+install.packages("shapper")
+
+# Charger le package shapper
+library(shapper)
+
+# Exemple : Calculer les valeurs de Shapley pour un modèle Random Forest avec la méthode d'encodage sans encodage
+rf_model <- randomForest(flag_resiliation ~ ., data = train_data, ntree = 100)
+shap_values <- shap(rf_model, data = test_data)
+
+
+```
+
+# score de propension
+
+```{r propension , echo=TRUE}
+
+library(glmnet)
+library(caret)
+library(pROC)
+
+set.seed(151286)  # Pour la reproductibilité
+
+# Diviser les données en 75% entraînement et 25% test
+train_indices <- createDataPartition(df_data$flag_resiliation, p = 0.75, list = FALSE)
+train_data <- df_data[train_indices, ]
+test_data <- df_data[-train_indices, ]
+
+train_indices_one_hot <- createDataPartition(encoded_data_one_hot$flag_resiliation, p = 0.75, list = FALSE)
+train_data_one_hot <- encoded_data_one_hot[train_indices_one_hot, ]
+test_data_one_hot <- encoded_data_one_hot[-train_indices_one_hot, ]
+
+train_indices_freq <- createDataPartition(encoded_data_freq$flag_resiliation, p = 0.75, list = FALSE)
+train_data_freq <- encoded_data_freq[train_indices_freq, ]
+test_indices_freq <- setdiff(seq_len(nrow(encoded_data_freq)), train_indices_freq)
+test_data_freq <- encoded_data_freq[test_indices_freq, ]
+
+train_indices_target <- createDataPartition(encoded_data_target$flag_resiliation, p = 0.75, list = FALSE)
+train_data_target <- encoded_data_target[train_indices_target, ]
+test_data_target <- encoded_data_target[-train_indices_target, ]
+
+# Fonction pour entraîner un modèle glm et retourner les données de test avec les scores de propension
+train_and_evaluate <- function(train_data, test_data) {
+  # Enlever les variables id_client et strate_engagement
+  train_data <- train_data[, !(names(train_data) %in% c("id_client", "strate_engagement"))]
+  test_data <- test_data[, !(names(test_data) %in% c("id_client", "strate_engagement"))]
+  
+  # Entraîner un modèle glm
+  glm_model <- glm(flag_resiliation ~ ., data = train_data, family = binomial)
+  
+  # Prédire les probabilités de résiliation sur les données de test
+  predicted_probabilities <- predict(glm_model, newdata = test_data, type = "response")
+  
+  # Ajouter les scores de propension aux données de test
+  test_data$propensity_score <- predicted_probabilities
+  
+  # Évaluer les performances en calculant le score de propension (AUC)
+  auc <- roc(test_data$flag_resiliation, predicted_probabilities)$auc
+  test_data$predicted_probabilities = predicted_probabilities
+  # Retourner les données de test avec les scores de propension et le score AUC
+  list(test_data_with_scores = test_data, auc = auc)
+}
+
+# Fonction pour entraîner et récupérer les données avec scores pour chaque méthode
+train_and_collect <- function(stratified_train_test) {
+  lapply(stratified_train_test, function(stratum_data) {
+    train_data <- stratum_data$train
+    test_data <- stratum_data$test
+    result <- train_and_evaluate(train_data, test_data)
+    result$test_data_with_scores
+  })
+}
+
+# Diviser les données en ensembles d'entraînement et de test pour chaque strate
+stratified_train_test <- lapply(unique(df_data$strate_engagement), function(stratum) {
+  train_indices <- which(df_data$strate_engagement != stratum)
+  test_indices <- which(df_data$strate_engagement == stratum)
+  list(train = df_data[train_indices, ], test = df_data[test_indices, ])
+})
+
+stratified_train_test_one_hot <- lapply(unique(encoded_data_one_hot$strate_engagement), function(stratum) {
+  train_indices <- which(encoded_data_one_hot$strate_engagement != stratum)
+  test_indices <- which(encoded_data_one_hot$strate_engagement == stratum)
+  list(train = encoded_data_one_hot[train_indices, ], test = encoded_data_one_hot[test_indices, ])
+})
+
+stratified_train_test_freq <- lapply(unique(encoded_data_freq$strate_engagement), function(stratum) {
+  train_indices <- which(encoded_data_freq$strate_engagement != stratum)
+  test_indices <- which(encoded_data_freq$strate_engagement == stratum)
+  list(train = encoded_data_freq[train_indices, ], test = encoded_data_freq[test_indices, ])
+})
+
+stratified_train_test_target <- lapply(unique(encoded_data_target$strate_engagement), function(stratum) {
+  train_indices <- which(encoded_data_target$strate_engagement != stratum)
+  test_indices <- which(encoded_data_target$strate_engagement == stratum)
+  list(train = encoded_data_target[train_indices, ], test = encoded_data_target[test_indices, ])
+})
+
+# Récupérer les données de test avec scores pour chaque méthode
+test_data_with_scores_sans_encodage <- train_and_collect(stratified_train_test)
+test_data_with_scores_one_hot <- train_and_collect(stratified_train_test_one_hot)
+test_data_with_scores_freq <- train_and_collect(stratified_train_test_freq)
+test_data_with_scores_target <- train_and_collect(stratified_train_test_target)
+
+# Combiner les résultats en un seul data frame pour chaque méthode
+combine_results <- function(test_data_with_scores_list) {
+  do.call(rbind, test_data_with_scores_list)
+}
+
+combined_results_sans_encodage <- combine_results(test_data_with_scores_sans_encodage)
+combined_results_one_hot <- combine_results(test_data_with_scores_one_hot)
+combined_results_freq <- combine_results(test_data_with_scores_freq)
+combined_results_target <- combine_results(test_data_with_scores_target)
+
+# Sauvegarder les résultats dans des fichiers CSV
+write.csv(combined_results_sans_encodage, "scores_propension_sans_encodage.csv", row.names = FALSE)
+write.csv(combined_results_one_hot, "scores_propension_one_hot.csv", row.names = FALSE)
+write.csv(combined_results_freq, "scores_propension_freq.csv", row.names = FALSE)
+write.csv(combined_results_target, "scores_propension_target.csv", row.names = FALSE)
+
+# Afficher les dimensions des fichiers CSV pour vérifier
+dim(combined_results_sans_encodage)
+dim(combined_results_one_hot)
+dim(combined_results_freq)
+dim(combined_results_target)
+
+
+# Fonction pour combiner les résultats
+combine_results <- function(test_data_list) {
+  combined <- do.call(rbind, test_data_list)
+  return(combined)
+}
+
+# Combiner les résultats
+combined_results_sans_encodage <- combine_results(test_data_with_scores_sans_encodage)
+combined_results_one_hot <- combine_results(test_data_with_scores_one_hot)
+combined_results_freq <- combine_results(test_data_with_scores_freq)
+combined_results_target <- combine_results(test_data_with_scores_target)
+
+# Fonction pour combiner les résultats
+combine_results <- function(test_data_list) {
+  combined <- do.call(rbind, test_data_list)
+  return(combined)
+}
+
+# Combiner les résultats
+combined_results_sans_encodage <- combine_results(test_data_with_scores_sans_encodage)
+combined_results_one_hot <- combine_results(test_data_with_scores_one_hot)
+combined_results_freq <- combine_results(test_data_with_scores_freq)
+combined_results_target <- combine_results(test_data_with_scores_target)
+
+# Fonction pour afficher les 5 premières lignes triées par score de propension (décroissant)
+# et sélectionner uniquement les colonnes flag_resiliation et propensity_score
+display_top5_propensity <- function(combined_results) {
+  sorted_results <- combined_results[order(-combined_results$propensity_score), ]
+  top5 <- head(sorted_results[, c("flag_resiliation", "propensity_score")], 5)
+  print(top5)
+}
+
+# Afficher les 5 premières lignes en ordre décroissant du score de propension pour chaque méthode
+cat("Sans encodage:\n")
+display_top5_propensity(combined_results_sans_encodage)
+cat("\nOne-hot encoding:\n")
+display_top5_propensity(combined_results_one_hot)
+cat("\nEncodage basé sur la fréquence:\n")
+display_top5_propensity(combined_results_freq)
+cat("\nEncodage basé sur la cible:\n")
+display_top5_propensity(combined_results_target)
+```
+```{r shapley , echo=TRUE}
+# Charger le package nécessaire si ce n'est pas déjà fait
+# install.packages("DALEX")
+
+library(DALEX)
+
+# Charger votre modèle GLM (assurez-vous qu'il est déjà entraîné et prêt à l'emploi)
+glm_model <- glm(flag_resiliation ~ ., data = train_data, family = binomial)
+
+# Créer un explainer avec DALEX
+explainer <- explain(glm_model,
+                     data = test_data[, !names(test_data) %in% c("flag_resiliation", "propensity_score")],
+                     y = test_datat$flag_resiliation,
+                     label = "GLM Model")
+
+# Sélectionner une observation spécifique pour expliquer les valeurs de Shapley
+observation <- test_data[1, !names(test_data) %in% c("flag_resiliation", "propensity_score")]
+
+# Calculer les valeurs de Shapley pour cette observation
+shap_values_one_hot <- predict_parts(explainer, new_observation = observation)
+
+# Afficher les résultats des valeurs de Shapley
+print(shap_values_one_hot)
+``` 
+

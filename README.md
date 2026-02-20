@@ -75,27 +75,32 @@ L’objectif est de construire un score de churn robuste et interprétable afin 
 
 ## Structure du projet
 
-churn-score-modeling-telecom/
+telecom-churn-prediction/
 │
-├── data/ # Données brutes et fichiers sources
-│ └── base_telecom_2022_12.txt
+├── data/
+│   ├── raw/                      # Données brutes (non modifiées)
+│   └── processed/                # Données nettoyées et transformées
 │
-├── scripts/ # Scripts d’analyse et de modélisation
-│ └── Pretraitement_donnees_telecom.Rmd
+├── notebooks/
+│   └── 01_preprocessing_modeling.Rmd   # Notebook principal reproductible
 │
-├── outputs/ # Résultats générés
-│ ├── graphiques/ # Visualisations produites
-│ ├── scores_propension.csv # Scores de churn prédits
-│ ├── scores_propension_freq.csv
-│ ├── scores_propension_one_hot.csv
-│ └── scores_propension_target.csv
+├── src/                          # Scripts d’analyse et de modélisation
+│   ├── Pretraitement_donnees_telecom.Rmd
 │
-├── docs/ # Documentation complémentaire
-│ └── memoire.pdf
+├── models/                       # Modèles sauvegardés
+│   └── rf_model.rds
 │
-├── .gitignore # Fichiers à ignorer par Git
-├── README.md # Présentation du projet
-└── LICENSE # Licence du projet (ex: MIT)
+├── reports/
+│   └── final_report.pdf          # Rapport / mémoire
+│
+├── results/
+│   ├── auc_scores.csv
+│   ├── propensity_scores.csv
+│   └── model_comparison.csv
+│
+├── requirements.txt              # Dépendances (packages R utilisés)
+├── README.md                     # Présentation du projet
+└── .gitignore
 
 ### Description des dossiers
 

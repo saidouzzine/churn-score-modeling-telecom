@@ -75,32 +75,33 @@ L’objectif est de construire un score de churn robuste et interprétable afin 
 
 ## Structure du projet
 
-telecom-churn-prediction/
+telecom-churn-prediction
 │
-├── data/
-│   ├── raw/                      # Données brutes (non modifiées)
-│   └── processed/                # Données nettoyées et transformées
+├── data
+│   ├── raw
+│   └── processed
 │
-├── notebooks/
-│   └── 01_preprocessing_modeling.Rmd   # Notebook principal reproductible
+├── notebooks
+│   └── 01_preprocessing_modeling.Rmd
 │
-├── src/                          # Scripts d’analyse et de modélisation
-│   ├── Pretraitement_donnees_telecom.Rmd
+├── src
+│   └── Pretraitement_donnees_telecom.Rmd
 │
-├── models/                       # Modèles sauvegardés
+├── models
 │   └── rf_model.rds
 │
-├── reports/
-│   └── final_report.pdf          # Rapport / mémoire
+├── reports
+│   └── final_report.pdf
 │
-├── results/
+├── results
 │   ├── auc_scores.csv
 │   ├── propensity_scores.csv
 │   └── model_comparison.csv
 │
-├── requirements.txt              # Dépendances (packages R utilisés)
-├── README.md                     # Présentation du projet
+├── requirements.txt
+├── README.md
 └── .gitignore
+
 
 ### Description des dossiers
 

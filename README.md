@@ -75,6 +75,7 @@ L’objectif est de construire un score de churn robuste et interprétable afin 
 
 ## Structure du projet
 
+```
 telecom-churn-prediction
 │
 ├── data
@@ -101,7 +102,7 @@ telecom-churn-prediction
 ├── requirements.txt
 ├── README.md
 └── .gitignore
-
+```
 
 ### Description des dossiers
 

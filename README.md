@@ -3,7 +3,7 @@ Projet de modélisation du churn client en télécommunications : stratification
 
 # 2. Prédiction du Churn Télécom et Prétraitement des Données
 
-## 2.1 Aperçu du projet
+## Aperçu du projet
 Ce projet présente une chaîne complète de prétraitement des données et de prédiction du churn dans le secteur des télécommunications.  
 L’objectif est de construire un score de churn robuste et interprétable afin d’identifier les clients à risque et d’améliorer les stratégies de rétention.
 

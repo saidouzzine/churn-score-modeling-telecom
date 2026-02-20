@@ -1,3 +1,7 @@
+![R](https://img.shields.io/badge/R-276DC3?logo=r&logoColor=white&style=for-the-badge)
+![Machine Learning](https://img.shields.io/badge/Machine%20Learning-Random%20Forest%20%7C%20GLM-brightgreen?style=for-the-badge)
+![Telecom Churn](https://img.shields.io/badge/Telecom%20Churn-Modeling-blueviolet?style=for-the-badge)
+
 # 1. Projet : churn-score-modeling-telecom
 Projet de modélisation du churn client en télécommunications : stratification des données, encodage des variables catégorielles et comparaison GLM vs Random Forest pour construire un score prédictif robuste et interprétable.
 

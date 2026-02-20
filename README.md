@@ -79,25 +79,14 @@ L’objectif est de construire un score de churn robuste et interprétable afin 
 telecom-churn-prediction
 │
 ├── data
-│   ├── raw
+│   ├── raw -- confidentiel
 │   └── processed
-│
-├── notebooks
-│   └── 01_preprocessing_modeling.Rmd
 │
 ├── src
 │   └── Pretraitement_donnees_telecom.Rmd
 │
-├── models
-│   └── rf_model.rds
-│
 ├── reports
 │   └── final_report.pdf
-│
-├── results
-│   ├── auc_scores.csv
-│   ├── propensity_scores.csv
-│   └── model_comparison.csv
 │
 ├── requirements.txt
 ├── README.md

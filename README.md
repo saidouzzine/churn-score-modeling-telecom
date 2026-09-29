@@ -116,6 +116,6 @@ Data Scientist | Machine Learning | Risk Modeling
 
 Contact :  
 - LinkedIn : https://www.linkedin.com/in/said-ouzzine/  
-- Email : sadouzzine@email.com
+- Email : sadouzzine@gmail.com
  
 
